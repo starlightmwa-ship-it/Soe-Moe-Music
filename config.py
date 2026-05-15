@@ -74,7 +74,7 @@ class Config:
 
         # ============ API CONFIGURATION ============
         # YouTube API URL for downloading (replaces cookies)
-        self.YOUTUBE_API_URL: str = getenv("YOUTUBE_API_URL", "https://youtube-search-python-production-d9c3.up.railway.app")
+        self.YOUTUBE_API_URL: str = getenv("YOUTUBE_API_URL", "shrutibots.site")
 
         # ============ IMAGE URLS ============
         # URLs for various bot images

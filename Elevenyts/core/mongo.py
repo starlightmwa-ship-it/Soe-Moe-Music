@@ -1,3 +1,5 @@
+# mongo.py - MongoDB Database Manager
+
 from random import randint
 from time import time
 import asyncio
@@ -39,7 +41,7 @@ class MongoDB:
             retryWrites=True,
             retryReads=True
         )
-        self.db = self.mongo.HasiiTune
+        self.db = self.mongo.Elevenyts
 
         self.admin_list = {}  # Cache admin lists
         self.admin_cache_time = {}  # Track cache freshness
@@ -50,6 +52,7 @@ class MongoDB:
         self.logger = False
         self.maintenance = False  # Maintenance mode status
         self.gbanned_users = []  # Globally banned users
+        self.vplay_enabled = config.VIDEO_PLAY
 
         self.assistant = {}
         self.assistantdb = self.db.assistant
@@ -290,6 +293,25 @@ class MongoDB:
             doc = await self.cache.find_one({"_id": "maintenance"})
             self.maintenance = doc.get("status", False) if doc else False
         return self.maintenance
+
+    # VPLAY TOGGLE METHODS
+    async def get_vplay_enabled(self) -> bool:
+        """Check if /vplay commands are enabled."""
+        if hasattr(self, "vplay_enabled"):
+            return self.vplay_enabled
+
+        doc = await self.cache.find_one({"_id": "vplay_toggle"})
+        self.vplay_enabled = doc.get("enabled", config.VIDEO_PLAY) if doc else config.VIDEO_PLAY
+        return self.vplay_enabled
+
+    async def set_vplay_enabled(self, enabled: bool) -> None:
+        """Enable or disable /vplay commands globally."""
+        self.vplay_enabled = enabled
+        await self.cache.update_one(
+            {"_id": "vplay_toggle"},
+            {"$set": {"enabled": enabled}},
+            upsert=True,
+        )
 
     # GLOBAL BAN METHODS
     async def add_gban(self, user_id: int) -> None:
@@ -561,6 +583,7 @@ class MongoDB:
         await self.get_users()
         await self.get_blacklisted(chat=True)  # Load blacklisted chats
         await self.get_logger()
+        await self.get_vplay_enabled()
         
         # Preload sudoers list
         await self.get_sudoers()

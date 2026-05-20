@@ -1,3 +1,7 @@
+# ==============================================================================
+# shuffle.py - Shuffle Queue Command
+# ==============================================================================
+
 import random
 from pyrogram import filters, types
 
@@ -5,36 +9,42 @@ from Elevenyts import app, db, lang, queue
 from Elevenyts.helpers import can_manage_vc
 
 
-@app.on_message(filters.command(["shuffle"]) & filters.group & ~app.bl_users)
+@app.on_message(filters.command(["shuffle", "cshuffle"]) & filters.group & ~app.bl_users)
 @lang.language()
 @can_manage_vc
 async def _shuffle(_, m: types.Message):
-    # Auto-delete command message
     try:
         await m.delete()
     except Exception:
         pass
     
-    items = queue.get_all(m.chat.id)
+    # Check for channel play mode
+    is_channel = m.command[0].lower() == "cshuffle"
+    chat_id = m.chat.id
+    
+    if is_channel:
+        channel_id = await db.get_cmode(m.chat.id)
+        if channel_id is None:
+            return await m.reply_text("Channel play is not enabled. Use /channelplay to enable.")
+        chat_id = channel_id
+    
+    items = queue.get_all(chat_id)
     
     if not items or len(items) <= 1:
-        return await m.reply_text("⚠️ Queue is empty or has only one track!")
+        return await m.reply_text("Queue is empty or has only one track!")
     
-    # Get current track and remaining items
     current = items[0] if items else None
     remaining = items[1:] if len(items) > 1 else []
     
     if not remaining:
-        return await m.reply_text("⚠️ No tracks to shuffle!")
+        return await m.reply_text("No tracks to shuffle!")
     
-    # Shuffle remaining tracks
     random.shuffle(remaining)
     
-    # Rebuild queue with current track first
-    queue.clear(m.chat.id)
+    queue.clear(chat_id)
     if current:
-        queue.add(m.chat.id, current)
+        queue.add(chat_id, current)
     for item in remaining:
-        queue.add(m.chat.id, item)
+        queue.add(chat_id, item)
     
-    await m.reply_text(f"🔀 Queue **shuffled**! ({len(remaining)} tracks randomized)")
+    await m.reply_text(f"Queue shuffled! ({len(remaining)} tracks randomized)")

@@ -1,6 +1,8 @@
+# _preload.py - Background Track Preloading Manager
+
 import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Dict, Set
 
 logger = logging.getLogger("Elevenyts")
 
@@ -15,8 +17,12 @@ class PreloadManager:
 
     def __init__(self):
         """Initialize the preload manager."""
-        self._tasks: Dict[int, asyncio.Task] = {}
-        self._preloaded: Dict[int, str] = {}  # chat_id -> media_id
+        # Track active preload tasks by chat and media id:
+        # {chat_id: {media_id: task}}
+        self._tasks: Dict[int, Dict[str, asyncio.Task]] = {}
+        # Track successfully preloaded media ids by chat:
+        # {chat_id: {media_id, ...}}
+        self._preloaded: Dict[int, Set[str]] = {}
 
     async def preload_next(self, chat_id: int, media) -> None:
         """
@@ -26,17 +32,29 @@ class PreloadManager:
             chat_id: The chat ID to preload for
             media: The Media/Track object to preload
         """
-        # Cancel any existing preload task for this chat
-        await self.cancel_preload(chat_id)
+        media_id = getattr(media, "id", None)
+        if not media_id:
+            return
 
-        # Check if already preloaded
-        if self._preloaded.get(chat_id) == media.id:
-            logger.debug(f"Track {media.id} already preloaded for chat {chat_id}")
+        # Initialize per-chat stores
+        if chat_id not in self._tasks:
+            self._tasks[chat_id] = {}
+        if chat_id not in self._preloaded:
+            self._preloaded[chat_id] = set()
+
+        # Skip if already preloaded
+        if media_id in self._preloaded[chat_id]:
+            logger.debug(f"Track {media_id} already preloaded for chat {chat_id}")
+            return
+
+        # Skip if already actively preloading
+        existing = self._tasks[chat_id].get(media_id)
+        if existing and not existing.done():
             return
 
         # Start new preload task
         task = asyncio.create_task(self._preload_task(chat_id, media))
-        self._tasks[chat_id] = task
+        self._tasks[chat_id][media_id] = task
 
     async def _preload_task(self, chat_id: int, media) -> None:
         """
@@ -50,19 +68,20 @@ class PreloadManager:
             # Import here to avoid circular dependency
             from Elevenyts import yt
 
-            logger.debug(f"Starting preload for chat {chat_id}: {media.title} (video={getattr(media, 'video', False)})")
+            logger.debug(f"Starting preload for chat {chat_id}: {media.title}")
             
-            # ========== FIX: Preserve video flag ==========
-            # Download the track with correct video flag
+            # Download the track
             if not media.file_path:
-                # Get video flag from media object
-                is_video = getattr(media, 'video', False)
-                media.file_path = await yt.download(media.id, is_live=getattr(media, 'is_live', False), video=is_video)
-                self._preloaded[chat_id] = media.id
-                logger.debug(f"Preload complete for chat {chat_id}: {media.title} (video={is_video})")
+                media.file_path = await yt.download(
+                    media.id,
+                    video=getattr(media, "video", False),
+                )
+                if media.file_path:
+                    self._preloaded.setdefault(chat_id, set()).add(media.id)
+                logger.debug(f"Preload complete for chat {chat_id}: {media.title}")
             else:
                 logger.debug(f"Track already has file_path for chat {chat_id}: {media.title}")
-                self._preloaded[chat_id] = media.id
+                self._preloaded.setdefault(chat_id, set()).add(media.id)
                 
         except asyncio.CancelledError:
             logger.debug(f"Preload cancelled for chat {chat_id}")
@@ -70,8 +89,12 @@ class PreloadManager:
         except Exception as e:
             logger.error(f"Preload error for chat {chat_id}: {e}")
         finally:
-            # Clean up task reference
-            self._tasks.pop(chat_id, None)
+            # Clean up task reference for this specific media id
+            media_tasks = self._tasks.get(chat_id)
+            if media_tasks:
+                media_tasks.pop(getattr(media, "id", None), None)
+                if not media_tasks:
+                    self._tasks.pop(chat_id, None)
 
     async def cancel_preload(self, chat_id: int) -> None:
         """
@@ -80,13 +103,13 @@ class PreloadManager:
         Args:
             chat_id: The chat ID to cancel preload for
         """
-        task = self._tasks.get(chat_id)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        media_tasks = self._tasks.get(chat_id, {})
+        if media_tasks:
+            active = [task for task in media_tasks.values() if not task.done()]
+            for task in active:
+                task.cancel()
+            if active:
+                await asyncio.gather(*active, return_exceptions=True)
             logger.debug(f"Cancelled preload for chat {chat_id}")
         
         # Clear preloaded cache
@@ -104,7 +127,7 @@ class PreloadManager:
         Returns:
             bool: True if the track is preloaded
         """
-        return self._preloaded.get(chat_id) == media_id
+        return media_id in self._preloaded.get(chat_id, set())
 
     def clear(self, chat_id: int) -> None:
         """

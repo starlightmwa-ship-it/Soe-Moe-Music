@@ -82,7 +82,18 @@ def playlist_to_queue(chat_id: int, tracks: list) -> str:
     return text
 
 @app.on_message(
-    filters.command(["play", "playforce", "vplay", "vplayforce", "cplay", "cplayforce"])
+    filters.command(
+        [
+            "play",
+            "playforce",
+            "cplay",
+            "cplayforce",
+            "vplay",
+            "vplayforce",
+            "cvplay",
+            "cvplayforce",
+        ]
+    )
     & filters.group
     & ~app.bl_users
 )
@@ -101,14 +112,6 @@ async def play_hndlr(
         await m.delete()
     except Exception:
         pass
-    
-    # ========== DETECT VIDEO COMMANDS ==========
-    command = m.command[0].lower()
-    if command in ["vplay", "vplayforce"]:
-        video = True
-        if "force" in command:
-            force = True
-    # ===========================================
     
     # Handle channel play mode
     chat_id = m.chat.id
@@ -129,8 +132,8 @@ async def play_hndlr(
         except:
             await db.set_cmode(m.chat.id, None)
             return await safe_reply(m,
-                "<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ɢᴇᴛ ᴄʜᴀɴɴᴇʟ.\n\n"
-                "ᴍᴀᴋᴇ ꜱᴜʀᴇ ɪ'ᴍ ᴀᴅᴍɪɴ ɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀɴᴅ ᴄʜᴀɴɴᴇʟ ᴘʟᴀʏ ɪꜱ ꜱᴇᴛ ᴄᴏʀʀᴇᴄᴛʟʏ.</blockquote>"
+                "<blockquote>❌ Cannot find channel!\n\n"
+                "Please make sure I'm admin in the channel and channel exists.</blockquote>"
             )
         
         # Auto-join assistant to channel if not already a member
@@ -152,14 +155,14 @@ async def play_hndlr(
                             invite_link = await app.export_chat_invite_link(channel_id)
                     except Exception:
                         return await safe_reply(m,
-                            f"<blockquote>❌ ᴀꜱꜱɪꜱᴛᴀɴᴛ ɴᴏᴛ ɪɴ ᴄʜᴀɴɴᴇʟ!\n\n"
-                            f"ᴘʟᴇᴀꜱᴇ ᴀᴅᴅ @{client.username if client.username else client.mention} "
-                            f"ᴛᴏ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀꜱ ᴀᴅᴍɪɴ ᴡɪᴛʜ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ ᴘᴇʀᴍɪꜱꜱɪᴏɴꜱ.</blockquote>"
+                            f"<blockquote>❌ Assistant cannot join channel!\n\n"
+                            f"Please add @{client.username if client.username else client.mention} "
+                            f"to the channel as an admin with permission to join.</blockquote>"
                         )
                 
                 # Show joining message
                 join_msg = await safe_reply(m,
-                    f"<blockquote>🔄 ᴊᴏɪɴɪɴɢ ᴀꜱꜱɪꜱᴛᴀɴᴛ ᴛᴏ ᴄʜᴀɴɴᴇʟ...</blockquote>"
+                    f"<blockquote>🔌 Joining assistant to channel...</blockquote>"
                 )
                 
                 # Try to join the channel
@@ -175,9 +178,9 @@ async def play_hndlr(
             except Exception as e:
                 error_str = str(e)
                 return await safe_reply(m,
-                    f"<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴀꜱꜱɪꜱᴛᴀɴᴛ ᴛᴏ ᴄʜᴀɴɴᴇʟ!\n\n"
-                    f"ᴘʟᴇᴀꜱᴇ ᴍᴀɴᴜᴀʟʟʏ ᴀᴅᴅ @{client.username if client.username else client.mention} "
-                    f"ᴛᴏ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀꜱ ᴀᴅᴍɪɴ ᴡɪᴛʜ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ ᴘᴇʀᴍɪꜱꜱɪᴏɴꜱ.\n\n"
+                    f"<blockquote>❌ Failed to join assistant to channel!\n\n"
+                    f"Please manually add @{client.username if client.username else client.mention} "
+                    f"to the channel as an admin with permission to join.\n\n"
                     f"Error: {error_str}</blockquote>"
                 )
 
@@ -219,9 +222,9 @@ async def play_hndlr(
             except Exception as e:
                 await safe_edit(
                     sent,
-                    f"<blockquote>❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ꜰᴇᴛᴄʜ ᴘʟᴀʏʟɪꜱᴛ.\n\n"
-                    f"ʏᴏᴜᴛᴜʙᴇ ᴘʟᴀʏʟɪꜱᴛꜱ ᴀʀᴇ ᴄᴜʀʀᴇɴᴛʟʏ ᴇxᴘᴇʀɪᴇɴᴄɪɴɢ ɪꜱꜱᴜᴇꜱ. "
-                    f"ᴘʟᴇᴀꜱᴇ ᴛʀʏ ᴘʟᴀʏɪɴɢ ɪɴᴅɪᴠɪᴅᴜᴀʟ ꜱᴏɴɢꜱ ɪɴꜱᴛᴇᴀᴅ.</blockquote>"
+                    f"<blockquote>❌ Failed to fetch playlist.\n\n"
+                    f"YouTube playlists are currently experiencing issues. "
+                    f"Please try a single track instead.</blockquote>"
                 )
                 return
 
@@ -233,7 +236,7 @@ async def play_hndlr(
             tracks.remove(file)
             file.message_id = sent.id
         else:
-            file = await yt.search(url, sent.id, video=video)
+            file = await yt.search(url, sent.id)
 
         if not file:
             await safe_edit(
@@ -244,7 +247,7 @@ async def play_hndlr(
 
     elif len(m.command) >= 2:
         query = " ".join(m.command[1:])
-        file = await yt.search(query, sent.id, video=video)
+        file = await yt.search(query, sent.id)
         if not file:
             await safe_edit(
                 sent,
@@ -255,8 +258,10 @@ async def play_hndlr(
     if not file:
         return
 
-    # Set video attribute in file
-    file.video = video
+    file.video = getattr(file, "video", False) or video
+    if file.video:
+        for track in tracks:
+            track.video = True
 
     # Skip duration check for live streams
     if not file.is_live and file.duration_sec > config.DURATION_LIMIT:
@@ -314,7 +319,11 @@ async def play_hndlr(
             return
 
     if not file.file_path:
-        file.file_path = await yt.download(file.id, is_live=file.is_live, video=video)
+        file.file_path = await yt.download(
+            file.id,
+            is_live=file.is_live,
+            video=getattr(file, "video", False),
+        )
         if not file.file_path:
             await safe_edit(
                 sent,

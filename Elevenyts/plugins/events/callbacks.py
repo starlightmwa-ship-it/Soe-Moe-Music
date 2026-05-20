@@ -1,9 +1,11 @@
+# callbacks.py - Callback Query Handler
+
 import re
 import asyncio
 from functools import wraps
 
 from pyrogram import filters, types
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, QueryIdInvalid
 
 from Elevenyts import tune, app, config, db, lang, logger, queue, tg, yt
 from Elevenyts.helpers import admin_check, buttons, can_manage_vc
@@ -15,6 +17,8 @@ def safe_callback(func):
     async def wrapper(client, query: types.CallbackQuery):
         try:
             return await func(client, query)
+        except QueryIdInvalid:
+            return
         except Exception as e:
             logger.error(f"Error in callback {func.__name__}: {e}", exc_info=True)
             try:
@@ -90,7 +94,7 @@ async def _controls(_, query: types.CallbackQuery):
             has_permission = True
     
     if not has_permission:
-        return await query.answer("⚠️ ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴘᴇʀᴍɪssɪᴏɴ ᴛᴏ ᴜsᴇ ᴛʜɪs.", show_alert=True)
+        return await query.answer("⚠️ You don't have permission to use this.", show_alert=True)
 
     if not await db.get_call(chat_id):
         return await query.answer(query.lang["not_playing"], show_alert=True)
@@ -117,7 +121,8 @@ async def _controls(_, query: types.CallbackQuery):
             return await query.answer(
                 query.lang["play_already_paused"], show_alert=True
             )
-        await tune.pause(chat_id)
+        if not await tune.pause(chat_id):
+            return await query.answer(query.lang["not_playing"], show_alert=True)
         if qaction:
             return await query.edit_message_reply_markup(
                 reply_markup=buttons.queue_markup(
@@ -130,7 +135,8 @@ async def _controls(_, query: types.CallbackQuery):
         status = query.lang["playing"]
         if await db.playing(chat_id):
             return await query.answer(query.lang["play_not_paused"], show_alert=True)
-        await tune.resume(chat_id)
+        if not await tune.resume(chat_id):
+            return await query.answer(query.lang["not_playing"], show_alert=True)
         if qaction:
             return await query.edit_message_reply_markup(
                 reply_markup=buttons.queue_markup(
@@ -162,14 +168,15 @@ async def _controls(_, query: types.CallbackQuery):
 
         msg = await app.send_message(chat_id=chat_id, text=query.lang["play_next"])
         if not media.file_path:
-            media.file_path = await yt.download(media.id)
+            media.file_path = await yt.download(
+                media.id,
+                video=getattr(media, "video", False),
+            )
         media.message_id = msg.id
         return await tune.play_media(chat_id, msg, media)
 
     elif action == "replay":
         media = queue.get_current(chat_id)
-        if not media:
-            return await query.answer(query.lang.get("nothing_playing", "Nothing is playing."), show_alert=True)
         media.user = user
         await tune.replay(chat_id)
         status = query.lang["replayed"]
@@ -233,10 +240,10 @@ async def handle_seek(query: types.CallbackQuery, chat_id: int, action: str, use
     """Handle seek forward/backward actions."""
     media = queue.get_current(chat_id)
     if not media or media.is_live:
-        return await query.answer("⚠️ ᴄᴀɴɴᴏᴛ ꜱᴇᴇᴋ ɪɴ ʟɪᴠᴇ ꜱᴛʀᴇᴀᴍꜱ!", show_alert=True)
+        return await query.answer("⚠️ Cannot seek in live streams!", show_alert=True)
     
     if not media.duration_sec or media.duration_sec == 0:
-        return await query.answer("⚠️ ᴄᴀɴɴᴏᴛ ꜱᴇᴇᴋ ɪɴ ᴛʜɪꜱ ᴛʀᴀᴄᴋ!", show_alert=True)
+        return await query.answer("⚠️ Cannot seek in this track!", show_alert=True)
     
     # Determine seek amount and direction
     if action == "seek_back_10":
@@ -252,7 +259,7 @@ async def handle_seek(query: types.CallbackQuery, chat_id: int, action: str, use
         seconds = 30
         label = "30s »"
     else:
-        return await query.answer("⚠️ ɪɴᴠᴀʟɪᴅ ꜱᴇᴇᴋ ᴀᴄᴛɪᴏɴ!", show_alert=True)
+        return await query.answer("⚠️ Invalid seek action!", show_alert=True)
     
     # Calculate new position
     current_time = getattr(media, 'time', 0)
@@ -260,9 +267,9 @@ async def handle_seek(query: types.CallbackQuery, chat_id: int, action: str, use
     
     # Check if we're at the boundaries
     if new_time == 0 and seconds < 0:
-        return await query.answer(f"⏮️ ᴀʟʀᴇᴀᴅʏ ᴀᴛ ᴛʜᴇ ʙᴇɢɪɴɴɪɴɢ!", show_alert=True)
+        return await query.answer(f"⏮️ Already at the beginning!", show_alert=True)
     if new_time >= media.duration_sec - 5 and seconds > 0:
-        return await query.answer(f"⏭️ ᴛᴏᴏ ᴄʟᴏꜱᴇ ᴛᴏ ᴛʜᴇ ᴇɴᴅ!", show_alert=True)
+        return await query.answer(f"⏭️ Too close to the end!", show_alert=True)
     
     # Perform seek
     success = await tune.seek_stream(chat_id, int(new_time))
@@ -275,12 +282,12 @@ async def handle_seek(query: types.CallbackQuery, chat_id: int, action: str, use
             time_str = time_module.strftime('%M:%S', time_module.gmtime(new_time))
         
         # Use callback answer to avoid FloodWait
-        await query.answer(f"✅ ꜱᴇᴇᴋᴇᴅ ᴛᴏ {time_str}", show_alert=True)
+        await query.answer(f"✅ Seeked to {time_str}", show_alert=True)
         
         # Try to send reply message with FloodWait handling and auto-delete after 5 seconds
         try:
             sent_msg = await query.message.reply_text(
-                f"✅ ꜱᴇᴇᴋᴇᴅ ᴛᴏ {time_str}\n\n<blockquote>ʙʏ {user}</blockquote>",
+                f"✅ Seeked to {time_str}\n\n<blockquote>By {user}</blockquote>",
                 quote=False
             )
             # Auto-delete after 5 seconds
@@ -303,16 +310,16 @@ async def handle_loop(query: types.CallbackQuery, chat_id: int, user: str):
     # Cycle through loop modes: 0 (off) -> 1 (single) -> 10 (queue) -> 0
     if current_loop == 0:
         new_loop = 1
-        text = "🔂 ʟᴏᴏᴘ: ꜱɪɴɢʟᴇ ᴛʀᴀᴄᴋ"
-        message = f"🔂 ʟᴏᴏᴘ ᴍᴏᴅᴇ ꜱᴇᴛ ᴛᴏ <b>ꜱɪɴɢʟᴇ ᴛʀᴀᴄᴋ</b>"
+        text = "🔂 Loop: Single Track"
+        message = f"🔂 Loop mode set to <b>Single Track</b>"
     elif current_loop == 1:
         new_loop = 10
-        text = "🔁 ʟᴏᴏᴘ: ǫᴜᴇᴜᴇ"
-        message = f"🔁 ʟᴏᴏᴘ ᴍᴏᴅᴇ ꜱᴇᴛ ᴛᴏ <b>ǫᴜᴇᴜᴇ</b>"
+        text = "🔁 Loop: Queue"
+        message = f"🔁 Loop mode set to <b>Queue</b>"
     else:
         new_loop = 0
-        text = "➡️ ʟᴏᴏᴘ: ᴏꜰꜰ"
-        message = f"➡️ ʟᴏᴏᴘ ᴍᴏᴅᴇ <b>ᴅɪꜱᴀʙʟᴇᴅ</b>"
+        text = "➡️ Loop: Off"
+        message = f"➡️ Loop mode <b>Disabled</b>"
     
     await db.set_loop(chat_id, new_loop)
     await query.answer(text, show_alert=False)
@@ -325,14 +332,14 @@ async def handle_shuffle(query: types.CallbackQuery, chat_id: int, user: str):
     
     items = queue.get_queue(chat_id)
     if not items or len(items) <= 1:
-        return await query.answer("⚠️ ǫᴜᴇᴜᴇ ɪꜱ ᴇᴍᴘᴛʏ ᴏʀ ʜᴀꜱ ᴏɴʟʏ ᴏɴᴇ ᴛʀᴀᴄᴋ!", show_alert=True)
+        return await query.answer("⚠️ Queue is empty or has only one track!", show_alert=True)
     
     # Get current track and remove from list
     current = items[0] if items else None
     remaining = items[1:] if len(items) > 1 else []
     
     if not remaining:
-        return await query.answer("⚠️ ɴᴏ ᴛʀᴀᴄᴋꜱ ᴛᴏ ꜱʜᴜꜰꜰʟᴇ!", show_alert=True)
+        return await query.answer("⚠️ No tracks to shuffle!", show_alert=True)
     
     # Shuffle remaining tracks
     random.shuffle(remaining)
@@ -344,9 +351,9 @@ async def handle_shuffle(query: types.CallbackQuery, chat_id: int, user: str):
     for item in remaining:
         queue.add(chat_id, item)
     
-    await query.answer("🔀 ǫᴜᴇᴜᴇ ꜱʜᴜꜰꜰʟᴇᴅ!", show_alert=False)
+    await query.answer("🔀 Queue shuffled!", show_alert=False)
     await query.message.reply_text(
-        f"🔀 ǫᴜᴇᴜᴇ <b>ꜱʜᴜꜰꜰʟᴇᴅ</b> ({len(remaining)} ᴛʀᴀᴄᴋꜱ)",
+        f"🔀 Queue <b>shuffled</b> ({len(remaining)} tracks)",
         quote=False
     )
 
@@ -447,4 +454,3 @@ async def _playmode(_, query: types.CallbackQuery):
             chat_id,
         )
     )
-    

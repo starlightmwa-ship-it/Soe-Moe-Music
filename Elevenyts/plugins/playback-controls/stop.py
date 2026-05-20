@@ -1,3 +1,7 @@
+# ==============================================================================
+# stop.py - Stop Playback Command
+# ==============================================================================
+
 import asyncio
 import logging
 from pyrogram import filters, types
@@ -9,11 +13,10 @@ from Elevenyts.helpers import can_manage_vc
 logger = logging.getLogger(__name__)
 
 
-@app.on_message(filters.command(["end", "stop"]) & filters.group & ~app.bl_users)
+@app.on_message(filters.command(["end", "stop", "cend", "cstop"]) & filters.group & ~app.bl_users)
 @lang.language()
 @can_manage_vc
 async def _stop(_, m: types.Message):
-    # Auto-delete command message
     try:
         await m.delete()
     except Exception:
@@ -21,9 +24,20 @@ async def _stop(_, m: types.Message):
     
     if len(m.command) > 1:
         return
-    if not await db.get_call(m.chat.id):
+    
+    # Check for channel play mode
+    is_channel = m.command[0].lower() in ["cend", "cstop"]
+    chat_id = m.chat.id
+    
+    if is_channel:
+        channel_id = await db.get_cmode(m.chat.id)
+        if channel_id is None:
+            return await m.reply_text("Channel play is not enabled. Use /channelplay to enable.")
+        chat_id = channel_id
+    
+    if not await db.get_call(chat_id):
         try:
-            return await m.reply_text(m.lang["not_playing"])
+            return await m.reply_text("Nothing is playing.")
         except (ChatSendPlainForbidden, ChatWriteForbidden):
             logger.warning("Cannot send text in this chat, skipping reply.")
             return
@@ -31,9 +45,9 @@ async def _stop(_, m: types.Message):
             logger.error(f"Failed to send reply: {e}")
             return
 
-    await tune.stop(m.chat.id)
+    await tune.stop(chat_id)
     try:
-        sent_msg = await m.reply_text(m.lang["play_stopped"].format(m.from_user.mention))
+        sent_msg = await m.reply_text(f"Stopped by {m.from_user.mention}")
     except (ChatSendPlainForbidden, ChatWriteForbidden):
         logger.warning("Cannot send text in this chat, stream stopped silently.")
         return
@@ -41,7 +55,6 @@ async def _stop(_, m: types.Message):
         logger.error(f"Failed to send stop confirmation: {e}")
         return
     
-    # Auto-delete after 5 seconds
     await asyncio.sleep(5)
     try:
         await sent_msg.delete()

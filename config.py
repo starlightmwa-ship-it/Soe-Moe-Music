@@ -1,5 +1,5 @@
 from os import getenv
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (create one from sample.env)
@@ -29,7 +29,7 @@ class Config:
         self.BOT_TOKEN: str = getenv("BOT_TOKEN", "")
         # Group/channel ID for logs (must be negative)
         self.LOGGER_ID: int = int(getenv("LOGGER_ID", "0"))
-        # Your user ID (get from @userinfobot)
+        # Your user ID (get from @elevenytsbot)
         self.OWNER_ID: int = int(getenv("OWNER_ID", "0"))
 
         # ============ DATABASE CONFIGURATION ============
@@ -46,7 +46,7 @@ class Config:
         self.PLAYLIST_LIMIT: int = int(getenv("PLAYLIST_LIMIT", "20"))
 
         # ============ ASSISTANT/USERBOT SESSIONS ============
-        # Pyrogram session strings - get from @StringFatherBot
+        # Pyrogram session strings - get from @genStringBot
         # You can have up to 3 assistants for handling multiple groups
         # Primary assistant (required)
         self.SESSION1: str = getenv("STRING_SESSION", "")
@@ -57,8 +57,8 @@ class Config:
 
         # ============ SUPPORT LINKS ============
         self.SUPPORT_CHANNEL: str = getenv(
-            "SUPPORT_CHANNEL", "https://t.me/elevenyts")
-        self.SUPPORT_CHAT: str = getenv("SUPPORT_CHAT", "https://t.me/elevenytsmusic")
+            "SUPPORT_CHANNEL", "https://t.me/elevenytsmusic")
+        self.SUPPORT_CHAT: str = getenv("SUPPORT_CHAT", "https://t.me/elevenytschats")
 
         # ============ EXCLUDED CHATS ============
         # Parse comma-separated chat IDs that assistants should never leave
@@ -71,27 +71,58 @@ class Config:
         self.AUTO_LEAVE: bool = self._str_to_bool(getenv("AUTO_LEAVE", "False"))
         # Enable/disable thumbnail generation (set False to use default thumb)
         self.THUMB_GEN: bool = self._str_to_bool(getenv("THUMB_GEN", "True"))
+        # Enable/disable video playback commands (/vplay)
+        self.VIDEO_PLAY: bool = self._str_to_bool(getenv("VIDEO_PLAY", "True"))
+        # Maximum video height (in pixels) when downloading /vplay media
+        self.VIDEO_MAX_HEIGHT: int = self._parse_video_height()
 
-        # ============ API CONFIGURATION ============
-        # YouTube API URL for downloading (replaces cookies)
-        self.YOUTUBE_API_URL: str = getenv("YOUTUBE_API_URL", "https://shrutibots.site")
+        # ============ YOUTUBE API CONFIGURATION (NEW) ============
+        # YouTube download API URL (Railway/self-hosted)
+        self.YOUTUBE_API_URL: str = getenv("YOUTUBE_API_URL", "https://associations-carroll-decide-expect.trycloudflare.com")
+        
+        # Enable/disable API fallback when cookies fail
+        self.ENABLE_API_FALLBACK: bool = self._str_to_bool(getenv("ENABLE_API_FALLBACK", "True"))
+        
+        # API timeout in seconds for downloads
+        self.API_TIMEOUT: int = int(getenv("API_TIMEOUT", "60"))
+        
+        # API timeout for stream downloads (longer for large files)
+        self.API_STREAM_TIMEOUT: int = int(getenv("API_STREAM_TIMEOUT", "300"))
+
+        # ============ YOUTUBE COOKIES ============
+        # Parse space-separated cookie URLs for age-restricted content
+        self.COOKIES_URL: List[str] = self._parse_cookies()
 
         # ============ IMAGE URLS ============
         # URLs for various bot images
         self.DEFAULT_THUMB: str = getenv(
             "DEFAULT_THUMB",
-            "https://files.catbox.moe/43u332.jpg"  # Default thumbnail
+            "https://files.catbox.moe/nhg5ko.png"  
         )
         self.PING_IMG: str = getenv(
-            "PING_IMG", "https://files.catbox.moe/43u332.jpg")    # Ping command image
+            "PING_IMG", "https://files.catbox.moe/nhg5ko.png")    
         self.START_IMG: str = getenv(
-            "START_IMG", "https://files.catbox.moe/43u332.jpg")  # Start command image
+            "START_IMG", "https://files.catbox.moe/nhg5ko.png")  
         self.RADIO_IMG: str = getenv(
-            "RADIO_IMG", "https://files.catbox.moe/43u332.jpg")    # Radio command image
+            "RADIO_IMG", "https://files.catbox.moe/nhg5ko.png")    
 
         # ============ MODERATION ============
         # List of usernames to exclude from admin mentions
         self.EXCLUDED_USERNAMES: List[str] = getenv("EXCLUDED_USERNAMES", "").split()
+
+    def _parse_video_height(self) -> int:
+        """Parse and validate video height configuration."""
+        default_height = 1080
+        raw_value = getenv("VIDEO_MAX_HEIGHT", str(default_height))
+        try:
+            height = int(raw_value)
+        except (TypeError, ValueError):
+            return default_height
+
+        if height <= 0:
+            return 0
+
+        return max(480, min(height, 2160))
 
     def _parse_excluded_chats(self) -> List[int]:
         """
@@ -110,6 +141,25 @@ class Config:
             if chat_id.lstrip('-').isdigit():
                 chat_ids.append(int(chat_id))
         return chat_ids
+
+    def _parse_cookies(self) -> List[str]:
+        """
+        Parse YouTube cookie URLs from space-separated string.
+        Supports multiple cookie sources (batbin, pastebin, etc.)
+
+        Returns:
+            List[str]: List of valid cookie URLs.
+        """
+        cookie_str = getenv("COOKIE_URL", "")
+        if not cookie_str:
+            return []
+
+        valid_sources = ["batbin.me", "pastebin.com", "paste.ee", "rentry.co"]
+        return [
+            url.strip()
+            for url in cookie_str.split()
+            if url.strip() and any(source in url for source in valid_sources)
+        ]
 
     @staticmethod
     def _str_to_bool(value: str) -> bool:
@@ -151,3 +201,7 @@ class Config:
                 f"❌ Missing required environment variables: {', '.join(missing)}\n"
                 f"Please check your .env file and ensure all required variables are set."
             )
+
+
+# Global config instance
+config = Config()

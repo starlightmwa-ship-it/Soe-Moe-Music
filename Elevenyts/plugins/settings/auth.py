@@ -1,3 +1,5 @@
+# auth.py - Authorization Management Commands
+
 import time
 
 from pyrogram import filters, types
@@ -18,17 +20,33 @@ async def _auth(_, m: types.Message):
     
     user = await utils.extract_user(m)
     if not user:
-        return await m.reply_text(m.lang["user_not_found"])
+        return await utils.safe_text(m, m.lang["user_not_found"])
 
     if m.command[0] == "auth":
         if await is_admin(m.chat.id, user.id):
-            return await m.reply_text(m.lang["auth_is_admin"])
+            return await utils.safe_text(m, m.lang["auth_is_admin"])
 
         await db.add_auth(m.chat.id, user.id)
-        await m.reply_text(m.lang["auth_added"].format(user.mention))
+        await utils.safe_text(m, m.lang["auth_added"].format(user.mention))
     else:
         await db.rm_auth(m.chat.id, user.id)
-        await m.reply_text(m.lang["auth_removed"].format(user.mention))
+        await utils.safe_text(m, m.lang["auth_removed"].format(user.mention))
+
+
+@app.on_message(filters.command(["authlist"]) & filters.group & ~app.bl_users)
+@lang.language()
+@admin_check
+async def _authlist(_, m: types.Message):
+    """Display the authorized users for the chat."""
+    auth_users = await db._get_auth(m.chat.id)
+    if not auth_users:
+        return await utils.safe_text(m, m.lang["auth_empty"])
+
+    auth_txt = m.lang["auth_list"].format(m.chat.title)
+    for idx, user_id in enumerate(sorted(auth_users), start=1):
+        auth_txt += f"\n{idx}. <a href=\"tg://user?id={user_id}\">{user_id}</a>"
+
+    await utils.safe_text(m, auth_txt)
 
 
 rel_hist = {}
@@ -49,9 +67,10 @@ async def _admincache(_, m: types.Message):
     
     if m.from_user.id in rel_hist:
         if time.time() < rel_hist[m.from_user.id]:
-            return await m.reply_text(m.lang["admin_cache_wait"])
+            return await utils.safe_text(m, m.lang["admin_cache_wait"])
 
     rel_hist[m.from_user.id] = time.time() + 600
-    sent = await m.reply_text(m.lang["admin_cache_reloading"])
+    sent = await utils.safe_text(m, m.lang["admin_cache_reloading"])
     await db.get_admins(m.chat.id, reload=True)
-    await sent.edit_text(m.lang["admin_cache_reloaded"])
+    if not await utils.safe_edit(sent, m.lang["admin_cache_reloaded"]):
+        await utils.safe_text(m, m.lang["admin_cache_reloaded"])

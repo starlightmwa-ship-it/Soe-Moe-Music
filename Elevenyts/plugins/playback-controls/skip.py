@@ -1,3 +1,7 @@
+# ==============================================================================
+# skip.py - Skip Track Command
+# ==============================================================================
+
 import asyncio
 import logging
 from pyrogram import filters, types
@@ -9,30 +13,38 @@ from Elevenyts.helpers import can_manage_vc
 logger = logging.getLogger(__name__)
 
 
-@app.on_message(filters.command(["skip", "next"]) & filters.group & ~app.bl_users)
+@app.on_message(filters.command(["skip", "next", "cskip", "cnext"]) & filters.group & ~app.bl_users)
 @lang.language()
 @can_manage_vc
 async def _skip(_, m: types.Message):
-    # Auto-delete command message
     try:
         await m.delete()
     except Exception:
         pass
     
-    if not await db.get_call(m.chat.id):
+    # Check for channel play mode
+    is_channel = m.command[0].lower() in ["cskip", "cnext"]
+    chat_id = m.chat.id
+    
+    if is_channel:
+        channel_id = await db.get_cmode(m.chat.id)
+        if channel_id is None:
+            return await m.reply_text("Channel play is not enabled. Use /channelplay to enable.")
+        chat_id = channel_id
+    
+    if not await db.get_call(chat_id):
         try:
-            return await m.reply_text(m.lang["not_playing"])
+            return await m.reply_text("Nothing is playing.")
         except (ChatSendPlainForbidden, ChatWriteForbidden):
             return
 
-    await tune.play_next(m.chat.id)
+    await tune.play_next(chat_id)
     try:
-        sent_msg = await m.reply_text(m.lang["play_skipped"].format(m.from_user.mention))
+        sent_msg = await m.reply_text(f"Skipped by {m.from_user.mention}")
     except (ChatSendPlainForbidden, ChatWriteForbidden):
         logger.warning("Cannot send plain text in media-only chat")
         return
     
-    # Auto-delete after 5 seconds
     await asyncio.sleep(5)
     try:
         await sent_msg.delete()

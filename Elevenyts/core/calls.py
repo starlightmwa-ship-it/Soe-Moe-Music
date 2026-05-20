@@ -1,3 +1,5 @@
+# calls.py - Voice Call Handler (PyTgCalls Integration)
+
 import asyncio
 import logging
 from ntgcalls import ConnectionNotFound, TelegramServerError
@@ -186,7 +188,7 @@ class TgCall(PyTgCalls):
             if chat.type not in [enums.ChatType.SUPERGROUP, enums.ChatType.GROUP, enums.ChatType.CHANNEL]:
                 logger.error(f"Invalid chat type for {chat_id}: {chat.type}")
                 if message:
-                    await message.edit_text("❌ ᴄᴀɴ ᴏɴʟʏ ᴘʟᴀʏ ɪɴ ɢʀᴏᴜᴘꜱ/ᴄʜᴀɴɴᴇʟꜱ.")
+                    await message.edit_text("❌ Can only play in groups/channels.")
                 return
             # For channels, verify assistant is member
             if chat.type == enums.ChatType.CHANNEL:
@@ -195,7 +197,7 @@ class TgCall(PyTgCalls):
                 if not userbot_client:
                     logger.error(f"No userbot client available for {chat_id}")
                     if message:
-                        await message.edit_text("❌ ɴᴏ ᴀꜱꜱɪꜱᴛᴀɴᴛ ᴀᴠᴀɪʟᴀʙʟᴇ.")
+                        await message.edit_text("❌ No assistant available.")
                     return
 
                 try:
@@ -203,7 +205,7 @@ class TgCall(PyTgCalls):
                     if assistant_member.status == enums.ChatMemberStatus.BANNED:
                         logger.error(f"Assistant banned in channel {chat_id}")
                         if message:
-                            await message.edit_text("❌ ᴀꜱꜱɪꜱᴛᴀɴᴛ ɪꜱ ʙᴀɴɴᴇᴅ ɪɴ ᴛʜɪꜱ ᴄʜᴀɴɴᴇʟ.")
+                            await message.edit_text("❌ Assistant is banned in this channel.")
                         # Disable channel play
                         await db.set_cmode(chat_id, None)
                         return
@@ -213,8 +215,8 @@ class TgCall(PyTgCalls):
                             f"Assistant not in channel {chat_id}: {e}")
                         if message:
                             await message.edit_text(
-                                "❌ <b>ᴀꜱꜱɪꜱᴛᴀɴᴛ ɴᴏᴛ ɪɴ ᴄʜᴀɴɴᴇʟ!</b>\n\n"
-                                f"<blockquote>ᴘʟᴇᴀꜱᴇ ᴀᴅᴅ @{userbot_client.me.username} ᴛᴏ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀꜱ ᴀᴅᴍɪɴ ᴡɪᴛʜ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ ᴘᴇʀᴍɪꜱꜱɪᴏɴꜱ.</blockquote>"
+                                "❌ <b>Assistant not in channel!</b>\n\n"
+                                f"<blockquote>Please add @{userbot_client.me.username} to the channel as admin with voice chat permissions.</blockquote>"
                             )
                         # Disable channel play
                         await db.set_cmode(chat_id, None)
@@ -223,7 +225,7 @@ class TgCall(PyTgCalls):
             if "CHANNEL_INVALID" in str(e):
                 logger.error(f"Invalid channel {chat_id}: {e}")
                 if message:
-                    await message.edit_text("❌ ɪɴᴠᴀʟɪᴅ ᴄʜᴀɴɴᴇʟ. ᴅɪꜱᴀʙʟɪɴɢ ᴄʜᴀɴɴᴇʟ ᴘʟᴀʏ.")
+                    await message.edit_text("❌ Invalid channel. Disabling channel play.")
                 await db.set_cmode(chat_id, None)  # Disable channel play
                 return
             raise
@@ -425,8 +427,8 @@ class TgCall(PyTgCalls):
             if message:
                 try:
                     await message.edit_text(
-                        "⏱️ <b>ᴄᴏɴɴᴇᴄᴛɪᴏɴ ᴛɪᴍᴇᴅ ᴏᴜᴛ!</b>\n\n"
-                        "<blockquote>ꜰᴀɪʟᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ. ᴘʟᴇᴀꜱᴇ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ɴᴇᴛᴡᴏʀᴋ ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ.</blockquote>"
+                        "⏱️ <b>Connection timed out!</b>\n\n"
+                        "<blockquote>Failed to join voice chat. Please check your network and try again.</blockquote>"
                     )
                 except Exception:
                     pass
@@ -608,35 +610,7 @@ class TgCall(PyTgCalls):
                     return await self.stop(chat_id)
 
                 _lang = await lang.get_lang(chat_id)
-                try:
-                    msg = await app.send_message(chat_id=target_chat, text=_lang["play_next"])
-                except errors.FloodWait as fw:
-                    logger.warning(
-                        f"FloodWait in play_next for {chat_id}: waiting {fw.value}s")
-                    await asyncio.sleep(fw.value + 1)
-                    try:
-                        msg = await app.send_message(chat_id=target_chat, text=_lang["play_next"])
-                    except errors.ChannelPrivate:
-                        logger.warning(
-                            f"Bot removed from {chat_id}, cleaning up")
-                        await self.leave_call(chat_id)
-                        await db.rm_chat(chat_id)
-                        return
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to send play_next message after FloodWait for {chat_id}: {e}")
-                        # Continue without message - don't let this stop playback
-                        msg = None
-                except errors.ChannelPrivate:
-                    logger.warning(f"Bot removed from {chat_id}, cleaning up")
-                    await self.leave_call(chat_id)
-                    await db.rm_chat(chat_id)
-                    return
-                except Exception as e:
-                    logger.error(
-                        f"Failed to send play_next message for {chat_id}: {e}")
-                    msg = None
-
+                msg = None
                 if not media.file_path:
                     is_live = getattr(media, 'is_live', False)
                     media.file_path = await yt.download(
@@ -655,6 +629,23 @@ class TgCall(PyTgCalls):
                             except Exception:
                                 pass
                         return
+
+                try:
+                    msg = await app.send_message(chat_id=target_chat, text=_lang["play_next"])
+                except errors.FloodWait as fw:
+                    # Do not block playback on UI flood waits; continue without message.
+                    logger.warning(
+                        f"FloodWait in play_next for {chat_id}: skipping status message ({fw.value}s)")
+                    msg = None
+                except errors.ChannelPrivate:
+                    logger.warning(f"Bot removed from {chat_id}, cleaning up")
+                    await self.leave_call(chat_id)
+                    await db.rm_chat(chat_id)
+                    return
+                except Exception as e:
+                    logger.error(
+                        f"Failed to send play_next message for {chat_id}: {e}")
+                    msg = None
 
                 media.message_id = msg.id if msg else 0
                 if msg:

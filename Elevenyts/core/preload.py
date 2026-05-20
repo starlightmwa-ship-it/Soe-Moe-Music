@@ -1,3 +1,5 @@
+# preload.py - Background Track Preload Manager
+
 import asyncio
 from pathlib import Path
 from typing import Dict, Set
@@ -82,7 +84,11 @@ class PreloadManager:
             is_live = getattr(track, 'is_live', False)
             
             # Download the track (uses existing semaphore for rate limiting)
-            file_path = await yt.download(track_id, is_live=is_live)
+            file_path = await yt.download(
+                track_id,
+                is_live=is_live,
+                video=getattr(track, "video", False),
+            )
             
             if file_path:
                 # Update track with downloaded file path

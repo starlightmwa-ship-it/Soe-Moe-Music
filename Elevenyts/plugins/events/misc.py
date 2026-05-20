@@ -1,3 +1,5 @@
+# misc.py - Miscellaneous Event Handlers
+
 import asyncio
 import time
 
@@ -25,9 +27,9 @@ async def _maintenance_mode_check(_, m: types.Message):
         # Block non-sudo user with maintenance message
         try:
             await m.reply_text(
-                "<blockquote><b>🔧 ʙᴏᴛ ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ</b>\n\n"
-                "ᴛʜᴇ ʙᴏᴛ ɪꜱ ᴄᴜʀʀᴇɴᴛʟʏ ᴜɴᴅᴇʀɢᴏɪɴɢ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ.\n"
-                "ᴘʟᴇᴀꜱᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.</blockquote>"
+                "<blockquote><b>🔧 Bot Under Maintenance</b>\n\n"
+                "The bot is currently undergoing maintenance.\n"
+                "Please try again later.</blockquote>"
             )
         except Exception:
             pass
@@ -105,15 +107,18 @@ async def update_timer(length=10):
     async def _preload_next(chat_id, next_media):
         """Pre-download next song without blocking timer updates."""
         try:
-            next_media.file_path = await yt.download(next_media.id)
+            next_media.file_path = await yt.download(
+                next_media.id,
+                video=getattr(next_media, "video", False),
+            )
         except Exception as e:
             print(f"Preload error for chat {chat_id}: {e}")
 
     async def update_chat_timer(chat_id):
-        """Update timer for a specific chat every 10 seconds."""
+        """Update timer for a specific chat every 20 seconds."""
         while True:
             try:
-                await asyncio.sleep(10)
+                await asyncio.sleep(20)
 
                 # Check if chat is still active and playing
                 if chat_id not in db.active_calls or not await db.playing(chat_id):

@@ -6,7 +6,7 @@ pymongo~=4.15.5
 pytgcrypto~=1.2.11
 py-tgcalls~=2.2.8
 py-yt-search~=0.5.5
-youtube-search-python
+youtube-search-python>=2.0.0
 python-dotenv~=1.2.1
 yt-dlp[default]>=2026.3.3
 ffmpeg

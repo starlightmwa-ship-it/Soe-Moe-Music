@@ -1,381 +1,199 @@
-from pyrogram import filters
-from pyrogram import types
-from pyrogram.errors import FloodWait, MessageIdInvalid, MessageDeleteForbidden, ChatSendPlainForbidden, ChatWriteForbidden
-
-from Elevenyts import tune, app, config, db, lang, queue, tg, yt
-from Elevenyts.helpers import buttons, utils
-from Elevenyts.helpers._play import checkUB
+# Elevenyts/yt.py (အသစ်)
 import asyncio
 import logging
+from youtubesearchpython import VideosSearch  # ဒါကို အသစ်ထည့်
+from Elevenyts.config import DURATION_LIMIT
+from Elevenyts.helpers.telegram import Track
 
 logger = logging.getLogger(__name__)
 
+# မြန်မာသီချင်းအတွက် fallback keywords (လိုအပ်ရင်)
+BURMESE_FALLBACK = {
+    "အောင်လမင်း": "အောင်လမင်း official audio",
+    "နေတိုး": "နေတိုး song",
+    # လိုအပ်သလို ထပ်ထည့်
+}
 
-async def safe_edit(message, text, **kwargs):
+async def search(query: str, message_id: int = None) -> Track or None:
     """
-    Safely edit a message with proper error handling for common Telegram API errors.
-    
-    Args:
-        message: The message object to edit
-        text: New text content
-        **kwargs: Additional arguments for edit_text
-        
-    Returns:
-        True if successful, False otherwise
+    YouTube မှာ သီချင်းရှာတယ် - Innertube API သုံးတယ် (မြန်၊ အခမဲ့)
     """
     try:
-        await message.edit_text(text, **kwargs)
-        return True
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        try:
-            await message.edit_text(text, **kwargs)
-            return True
-        except (MessageIdInvalid, MessageDeleteForbidden, Exception):
-            return False
-    except (MessageIdInvalid, MessageDeleteForbidden):
-        # Message was deleted or became invalid - this is expected
-        return False
-    except Exception:
-        # Other errors - log but don't crash
-        return False
-
-
-async def safe_reply(message, text, **kwargs):
-    """
-    Safely send a reply message with proper error handling for media-only chats.
-    
-    Args:
-        message: The message object to reply to
-        text: Text content to send
-        **kwargs: Additional arguments for reply_text
+        logger.info(f"Searching: {query}")
         
-    Returns:
-        The sent message object if successful, None otherwise
-    """
-    try:
-        return await message.reply_text(text, **kwargs)
-    except (ChatSendPlainForbidden, ChatWriteForbidden):
-        logger.warning(f"Cannot send text in chat {message.chat.id} (chat write forbidden)")
-        return None
+        # မြန်မာစာ Zawgyi ရှိရင် Unicode ပြောင်း (လိုအပ်ရင်)
+        # import zawgyi
+        # if zawgyi.detect(query):
+        #     query = zawgyi.to_unicode(query)
+        
+        # Fallback စာရင်းထဲမှာ ရှိရင် ပြောင်းသုံး
+        for burmese_name, search_term in BURMESE_FALLBACK.items():
+            if burmese_name in query:
+                query = search_term
+                break
+        
+        # Innertube API နဲ့ ရှာ
+        videos_search = VideosSearch(query, limit=1)
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, videos_search.result
+        )
+        
+        if result and result.get('result') and len(result['result']) > 0:
+            video = result['result'][0]
+            
+            # Track object ဆောက်မယ်
+            track = Track()
+            track.id = video['id']
+            track.url = video['link']
+            track.title = video['title']
+            track.duration = video['duration']
+            track.duration_sec = _parse_duration(video['duration'])
+            track.thumb = video.get('thumbnails', [{}])[-1].get('url', '')
+            track.channel = video['channel']['name']
+            track.is_live = 'live' in video.get('type', '').lower()
+            
+            logger.info(f"Found: {track.title} ({track.duration})")
+            return track
+        else:
+            logger.warning(f"No results found for: {query}")
+            return None
+            
     except Exception as e:
-        logger.error(f"Failed to send reply: {e}")
-        return None
+        logger.error(f"Search error: {e}")
+        # Fallback to yt-dlp if Innertube fails
+        return await _search_fallback_ytdlp(query, message_id)
 
+def _parse_duration(duration_str: str) -> int:
+    """'3:45' ကို စက္ကန့် (225) ပြောင်း"""
+    if not duration_str:
+        return 0
+    parts = duration_str.split(':')
+    if len(parts) == 2:  # MM:SS
+        return int(parts[0]) * 60 + int(parts[1])
+    elif len(parts) == 3:  # HH:MM:SS
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    return int(parts[0]) if parts else 0
 
-def playlist_to_queue(chat_id: int, tracks: list) -> str:
+async def _search_fallback_ytdlp(query: str, message_id: int = None) -> Track or None:
     """
-    Add multiple tracks to queue and format them as a message.
-    
-    Args:
-        chat_id: The chat ID where queue is managed
-        tracks: List of Track objects to add
-        
-    Returns:
-        Formatted string listing all added tracks
+    Innertube အလုပ်မလုပ်ရင် yt-dlp နဲ့ fallback လုပ်
     """
-    text = "<blockquote expandable>"
-    for track in tracks:
-        pos = queue.add(chat_id, track)  # Add track to queue (returns 0-based index)
-        text += f"<b>{pos}.</b> {track.title}\n"  # Show actual queue position
-    text = text[:1948] + "</blockquote>"  # Limit message length
-    return text
-
-@app.on_message(
-    filters.command(
-        [
-            "play",
-            "playforce",
-            "cplay",
-            "cplayforce",
-            "vplay",
-            "vplayforce",
-            "cvplay",
-            "cvplayforce",
-        ]
-    )
-    & filters.group
-    & ~app.bl_users
-)
-@lang.language()
-@checkUB
-async def play_hndlr(
-    _,
-    m: types.Message,
-    force: bool = False,
-    url: str = None,
-    cplay: bool = False,
-    video: bool = False,
-) -> None:
-    # Auto-delete command message
-    try:
-        await m.delete()
-    except Exception:
-        pass
+    import yt_dlp
     
-    # Handle channel play mode
-    chat_id = m.chat.id
-    message_chat_id = m.chat.id  # Store original group chat ID for thumbnail
-    if cplay:
-        channel_id = await db.get_cmode(m.chat.id)
-        if channel_id is None:
-            return await safe_reply(m,
-                "<blockquote>❌ Channel play is not enabled.\n\n"
-                "To enable for linked channel:\n"
-                "`/channelplay linked`\n\n"
-                "To enable for any channel:\n"
-                "`/channelplay [channel_id]`</blockquote>"
-            )
-        try:
-            chat = await app.get_chat(channel_id)
-            chat_id = channel_id
-        except:
-            await db.set_cmode(m.chat.id, None)
-            return await safe_reply(m,
-                "<blockquote>❌ Cannot find channel!\n\n"
-                "Please make sure I'm admin in the channel and channel exists.</blockquote>"
-            )
-        
-        # Auto-join assistant to channel if not already a member
-        client = await db.get_client(channel_id)
-        try:
-            # Check if assistant is in the channel
-            await app.get_chat_member(channel_id, client.id)
-        except Exception:
-            # Assistant not in channel, try to join
-            try:
-                # For channels, we need an invite link
-                if chat.username:
-                    invite_link = chat.username
-                else:
-                    # Try to get/create invite link
-                    try:
-                        invite_link = chat.invite_link
-                        if not invite_link:
-                            invite_link = await app.export_chat_invite_link(channel_id)
-                    except Exception:
-                        return await safe_reply(m,
-                            f"<blockquote>❌ Assistant cannot join channel!\n\n"
-                            f"Please add @{client.username if client.username else client.mention} "
-                            f"to the channel as an admin with permission to join.</blockquote>"
-                        )
-                
-                # Show joining message
-                join_msg = await safe_reply(m,
-                    f"<blockquote>🔌 Joining assistant to channel...</blockquote>"
-                )
-                
-                # Try to join the channel
-                await client.join_chat(invite_link)
-                await asyncio.sleep(1)  # Give it time to fully join
-                
-                # Delete joining message
-                try:
-                    await join_msg.delete()
-                except:
-                    pass
-                    
-            except Exception as e:
-                error_str = str(e)
-                return await safe_reply(m,
-                    f"<blockquote>❌ Failed to join assistant to channel!\n\n"
-                    f"Please manually add @{client.username if client.username else client.mention} "
-                    f"to the channel as an admin with permission to join.\n\n"
-                    f"Error: {error_str}</blockquote>"
-                )
-
-    # Select emoji for this play session
-    play_emoji = m.lang["play_emoji"]
+    ydl_opts = {
+        'format': 'bestaudio',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': True,
+    }
     
     try:
-        sent = await safe_reply(m, m.lang["play_searching"].format(play_emoji))
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        try:
-            sent = await safe_reply(m, m.lang["play_searching"].format(play_emoji))
-        except FloodWait as e2:
-            # If still flood wait, wait longer and give up gracefully
-            await asyncio.sleep(e2.value)
-            return  # Abort silently
-        except Exception:
-            return  # Abort silently
-    except Exception:
-        return  # If we can't even send initial message, abort
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = await loop.run_in_executor(
+                None,
+                lambda: ydl.extract_info(f"ytsearch1:{query}", download=False)
+            )
+            
+            if info and info.get('entries') and len(info['entries']) > 0:
+                entry = info['entries'][0]
+                track = Track()
+                track.id = entry['id']
+                track.url = f"https://youtu.be/{entry['id']}"
+                track.title = entry['title']
+                track.duration = entry.get('duration_string', '0:00')
+                track.duration_sec = entry.get('duration', 0)
+                track.is_live = entry.get('is_live', False)
+                return track
+    except Exception as e:
+        logger.error(f"yt-dlp fallback error: {e}")
     
-    mention = m.from_user.mention
-    media = tg.get_media(m.reply_to_message) if m.reply_to_message else None
+    return None
+
+# playlist အတွက် function (အသစ်ပြင်ရန် လိုသေး)
+async def playlist(limit: int, mention: str, url: str) -> list:
+    """
+    YouTube playlist က tracks တွေကို ယူတယ်
+    """
+    from youtubesearchpython import Playlist as YTPlaylist
+    
     tracks = []
-    file = None  # Initialize file variable
-
-    # Check media first (Telegram files) before URL extraction
-    if media:
-        setattr(sent, "lang", m.lang)
-        file = await tg.download(m.reply_to_message, sent)
-
-    elif url:
-        if "playlist" in url:
-            await safe_edit(sent, m.lang["playlist_fetch"])
-            try:
-                tracks = await yt.playlist(
-                    config.PLAYLIST_LIMIT, mention, url
-                )
-            except Exception as e:
-                await safe_edit(
-                    sent,
-                    f"<blockquote>❌ Failed to fetch playlist.\n\n"
-                    f"YouTube playlists are currently experiencing issues. "
-                    f"Please try a single track instead.</blockquote>"
-                )
-                return
-
-            if not tracks:
-                await safe_edit(sent, m.lang["playlist_error"])
-                return
-
-            file = tracks[0]
-            tracks.remove(file)
-            file.message_id = sent.id
-        else:
-            file = await yt.search(url, sent.id)
-
-        if not file:
-            await safe_edit(
-                sent,
-                m.lang["play_not_found"].format(config.SUPPORT_CHAT)
-            )
-            return
-
-    elif len(m.command) >= 2:
-        query = " ".join(m.command[1:])
-        file = await yt.search(query, sent.id)
-        if not file:
-            await safe_edit(
-                sent,
-                m.lang["play_not_found"].format(config.SUPPORT_CHAT)
-            )
-            return
-
-    if not file:
-        return
-
-    file.video = getattr(file, "video", False) or video
-    if file.video:
-        for track in tracks:
-            track.video = True
-
-    # Skip duration check for live streams
-    if not file.is_live and file.duration_sec > config.DURATION_LIMIT:
-        await safe_edit(
-            sent,
-            m.lang["play_duration_limit"].format(config.DURATION_LIMIT // 60)
-        )
-        return
-
-    if await db.is_logger():
-        await utils.play_log(m, file.title, file.duration)
-
-    file.user = mention
-    if force:
-        queue.force_add(chat_id, file)
-    else:
-        position = queue.add(chat_id, file)  # Returns 0-based index
-
-        if await db.get_call(chat_id):
-            # When call is active, position 0 is currently playing
-            # So actual waiting position is: position (e.g., 1st waiting = index 1)
-            # Display as 1-based for users: index 1 → "1st in queue"
-            await safe_edit(
-                sent,
-                m.lang["play_queued"].format(
-                    position,  # Shows waiting position: 1, 2, 3...
-                    file.url,
-                    file.title,
-                    file.duration,
-                    m.from_user.mention,
-                ),
-                reply_markup=buttons.play_queued(
-                    chat_id, file.id, m.lang["play_now"]
-                ),
-            )
-            if tracks:
-                added = playlist_to_queue(chat_id, tracks)
-                try:
-                    await app.send_message(
-                        chat_id=m.chat.id,
-                        text=m.lang["playlist_queued"].format(len(tracks)) + added,
-                    )
-                except Exception:
-                    # Can't send message, continue anyway
-                    pass
-            
-            # ✨ NEW: Start preloading queued tracks in background
-            try:
-                from Elevenyts import preload
-                asyncio.create_task(preload.start_preload(chat_id, count=2))
-            except Exception:
-                # Non-critical, continue without preload
-                pass
-            
-            return
-
-    if not file.file_path:
-        file.file_path = await yt.download(
-            file.id,
-            is_live=file.is_live,
-            video=getattr(file, "video", False),
-        )
-        if not file.file_path:
-            await safe_edit(
-                sent,
-                "<blockquote>❌ Failed to download media.\n\n"
-                "Possible reasons:\n"
-                "• YouTube detected bot activity (update cookies)\n"
-                "• Video is region-blocked or private\n"
-                "• Age-restricted content (requires cookies)</blockquote>"
-            )
-
     try:
-        # Pass message_chat_id only if it's different from chat_id (channel play mode)
-        await tune.play_media(
-            chat_id=chat_id, 
-            message=sent, 
-            media=file, 
-            message_chat_id=message_chat_id if chat_id != message_chat_id else None
-        )
-        # React with emoji on successful play
-        try:
-            emoji = m.lang["play_emoji"]
-            await m.react(emoji)
-        except Exception:
-            # If reaction fails, continue anyway (not critical)
-            pass
+        playlist_obj = YTPlaylist(url)
+        await asyncio.get_event_loop().run_in_executor(None, playlist_obj.get_next_page, 10)
+        
+        for video in playlist_obj.videos[:limit]:
+            track = Track()
+            track.id = video['id']
+            track.url = video['link']
+            track.title = video['title']
+            track.duration = video.get('duration', '0:00')
+            track.user = mention
+            tracks.append(track)
     except Exception as e:
-        error_msg = str(e)
-        if "bot" in error_msg.lower() or "sign in" in error_msg.lower():
-            await safe_edit(
-                sent,
-                "<blockquote>❌ YouTube bot detection triggered.\n\n"
-                "Solution:\n"
-                "• Update YouTube cookies in `Elevenyts/cookies/` folder\n"
-                "• Wait a few minutes before trying again\n"
-                "• Try /radio for uninterrupted music\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>"
-            )
-        else:
-            await safe_edit(
-                sent,
-                f"<blockquote>❌ Playback error:\n{error_msg}\n\n"
-                f"Support: {config.SUPPORT_CHAT}</blockquote>"
-            )
-        return
-    if not tracks:
-        return
-    added = playlist_to_queue(chat_id, tracks)
+        logger.error(f"Playlist error: {e}")
+        # Fallback to yt-dlp
+        return await _playlist_fallback_ytdlp(limit, mention, url)
+    
+    return tracks
+
+async def _playlist_fallback_ytdlp(limit: int, mention: str, url: str) -> list:
+    """yt-dlp fallback for playlist"""
+    import yt_dlp
+    
+    tracks = []
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': True,
+    }
+    
     try:
-        await app.send_message(
-            chat_id=m.chat.id,
-            text=m.lang["playlist_queued"].format(len(tracks)) + added,
-        )
-    except Exception:
-        # Can't send message, but playback is working
-        pass
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+            
+            if info and info.get('entries'):
+                for entry in info['entries'][:limit]:
+                    if entry:
+                        track = Track()
+                        track.id = entry['id']
+                        track.url = f"https://youtu.be/{entry['id']}"
+                        track.title = entry['title']
+                        track.duration = entry.get('duration_string', '0:00')
+                        track.duration_sec = entry.get('duration', 0)
+                        track.user = mention
+                        tracks.append(track)
+    except Exception as e:
+        logger.error(f"Playlist fallback error: {e}")
+    
+    return tracks
+
+async def download(file_id: str, is_live: bool = False, video: bool = False) -> str:
+    """
+    သီချင်းကို download လုပ်တယ် (မူရင်းအတိုင်း ထားလို့ရ)
+    """
+    import yt_dlp
+    
+    format_type = 'bestvideo+bestaudio' if video else 'bestaudio'
+    ydl_opts = {
+        'format': format_type,
+        'outtmpl': f'downloads/{file_id}.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+    }
+    
+    if is_live:
+        ydl_opts['live_from_start'] = True
+    
+    try:
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = await loop.run_in_executor(
+                None,
+                lambda: ydl.extract_info(f"https://youtu.be/{file_id}", download=True)
+            )
+            return ydl.prepare_filename(info)
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        return None

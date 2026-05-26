@@ -99,7 +99,7 @@ class Thumbnail:
             h2 = self.watermark_font.size
 
             x2 = 1280 - w2 - 5
-            y2 = 720 - h2 - 5
+            y2 = 710 - h2 - 5
 
             draw.rounded_rectangle(
                 [x2 - 20, y2 - 10, x2 + w2 + 20, y2 + h2 + 10],

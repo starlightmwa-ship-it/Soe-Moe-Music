@@ -99,7 +99,7 @@ class Thumbnail:
             h2 = self.watermark_font.size
 
             x2 = 1280 - w2 - 5
-            y2 = 710 - h2 - 5
+            y2 = 730 - h2 - 5
 
             draw.rounded_rectangle(
                 [x2 - 20, y2 - 10, x2 + w2 + 20, y2 + h2 + 10],
@@ -111,17 +111,7 @@ class Thumbnail:
             for i, char in enumerate(_b):
                 draw.text((cx, y2), char, font=self.watermark_font, fill=colors[i % 3])
                 cx += self.watermark_font.getlength(char)
-
-            gradient = Image.new("L", (1, 300))
-            for i in range(300):
-                gradient.putpixel((0, i), int(255 * (i / 300)))
-
-            alpha = gradient.resize((1280, 300))
-            black_overlay = Image.new("RGBA", (1280, 300), (0, 0, 0, 200))
-            black_overlay.putalpha(alpha)
-
-            bg.paste(black_overlay, (0, 420), black_overlay)
-
+            
             thumb = base.resize((180, 180))
             mask = Image.new("L", thumb.size, 0)
             ImageDraw.Draw(mask).rounded_rectangle((0, 0, 180, 180), 25, fill=255)

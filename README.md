@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://files.catbox.moe/f177uk.jpg" alt="˹Elevenyts ᴍᴜꜱɪᴄ˼" width="400"/>
+  <img src="[https://files.catbox.moe/f177uk.jpg](https://deposit.pictures/p/d1a935433e0e442eafe7480a9967a6f7)" alt="˹Elevenyts ᴍᴜꜱɪᴄ˼" width="400"/>
   
   # 🎵 ˹SoeMoe ᴍᴜꜱɪᴄ˼
 

@@ -53,7 +53,7 @@ class Inline:
             keyboard.append(
                 [
                     self.ikb(
-                        text="ᴅᴇʟᴇᴛᴇ", callback_data=f"controls close {chat_id}"),
+                        text="🗑️ᴅᴇʟᴇᴛᴇ", callback_data=f"controls close {chat_id}"),
                 ]
             )
         return self.ikm(keyboard)
@@ -131,7 +131,7 @@ class Inline:
                 ],
                 [
                     self.ikb(
-                        text="ᴅᴇʟᴇᴛᴇ", callback_data=f"controls close {chat_id}"),
+                        text="🗑️ᴅᴇʟᴇᴛᴇ", callback_data=f"controls close {chat_id}"),
                 ]
             ]
         )

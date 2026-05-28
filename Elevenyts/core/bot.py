@@ -1,8 +1,10 @@
+# Elevenyts/bot.py
 import asyncio
 import pyrogram
 from typing import Optional
 
 from Elevenyts import config, logger
+from Elevenyts.cache_manager import init_cache_manager
 
 
 class Bot(pyrogram.Client):
@@ -56,6 +58,7 @@ class Bot(pyrogram.Client):
 
         This method:
         - Starts the Pyrogram client
+        - Starts Cache Manager for auto cleanup
         - Retrieves bot information
         - Verifies access to logger group
         - Checks bot admin status in logger group
@@ -64,6 +67,17 @@ class Bot(pyrogram.Client):
             SystemExit: If bot cannot access logger group or is not an admin.
         """
         await super().start()
+
+        # ============ START CACHE MANAGER (AUTO CLEANUP) ============
+        try:
+            init_cache_manager(
+                cache_dir="/tmp/bot_cache",
+                cleanup_interval_minutes=30,  # 30 minutes interval
+                min_free_mb=500  # Clean when less than 500MB free
+            )
+            logger.info("🗑️ Cache Manager started successfully")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to start Cache Manager: {e}")
 
         # Set bot information
         self.id = self.me.id
